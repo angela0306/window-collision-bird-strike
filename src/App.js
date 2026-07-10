@@ -58,12 +58,12 @@ import {
 // 1. Firebase 初始化與環境設定
 // ==========================================
 const firebaseConfig = {
-  apiKey: "AIzaSyCcoZWKVga42ZNfTYVpHt-BiD7qlaMeCYo",
-  authDomain: "window-collision-efe2f.firebaseapp.com",
-  projectId: "window-collision-efe2f",
-  storageBucket: "window-collision-efe2f.firebasestorage.app",
-  messagingSenderId: "374621914908",
-  appId: "1:374621914908:web:58c87eb63620a676279cd9",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MSSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 const globalAppId = "featherguard-app-v1";
 
@@ -81,7 +81,7 @@ try {
 // ==========================================
 const callGemini = async (prompt, base64Image) => {
   // 請填入你「重新產生」的新  Key
-  const apiKey = "";
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
