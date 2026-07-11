@@ -528,7 +528,7 @@ export default function App() {
               : rescueAIResult,
             timestamp: new Date().toISOString(),
             userId: user?.uid || "anonymous",
-            status: "pending", // 新通報預設為待審核，尚未同意/拒絕前不會出現在數據資料頁
+            reviewStatus: "pending", // 通報審核狀態（獨立欄位，不與鳥類傷況 status 混用）
           }
         );
         showToast("通報成功！");
@@ -1221,7 +1221,7 @@ export default function App() {
       const [selectedReport, setSelectedReport] = React.useState(null);
 
       // 僅統計已審核通過（approved）的通報，待審核與已拒絕的不列入數據資料
-      const approvedReports = reports.filter((r) => r.status === "approved");
+      const approvedReports = reports.filter((r) => r.reviewStatus === "approved");
 
       const total = approvedReports.length;
       const recent = approvedReports.slice(0, 5);
@@ -1924,7 +1924,7 @@ export default function App() {
                                           "bird_reports",
                                           item.id
                                         ),
-                                        { status: "approved" }
+                                        { reviewStatus: "approved" }
                                       );
                                       showToast("已同意通報並登錄");
                                     } catch (e) {
@@ -1932,14 +1932,14 @@ export default function App() {
                                     }
                                   }}
                                   disabled={
-                                    item.status === "approved" ||
-                                    item.status === "rejected"
+                                    item.reviewStatus === "approved" ||
+                                    item.reviewStatus === "rejected"
                                   }
                                   className="p-1.5 text-emerald-500 hover:bg-emerald-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                   title={
-                                    item.status === "approved"
+                                    item.reviewStatus === "approved"
                                       ? "已同意"
-                                      : item.status === "rejected"
+                                      : item.reviewStatus === "rejected"
                                       ? "已審核(拒絕)"
                                       : "同意通報"
                                   }
@@ -1964,7 +1964,7 @@ export default function App() {
                                           "bird_reports",
                                           item.id
                                         ),
-                                        { status: "rejected" }
+                                        { reviewStatus: "rejected" }
                                       );
                                       showToast("已拒絕該筆通報");
                                     } catch (e) {
@@ -1972,14 +1972,14 @@ export default function App() {
                                     }
                                   }}
                                   disabled={
-                                    item.status === "approved" ||
-                                    item.status === "rejected"
+                                    item.reviewStatus === "approved" ||
+                                    item.reviewStatus === "rejected"
                                   }
                                   className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                   title={
-                                    item.status === "rejected"
+                                    item.reviewStatus === "rejected"
                                       ? "已拒絕"
-                                      : item.status === "approved"
+                                      : item.reviewStatus === "approved"
                                       ? "已審核(同意)"
                                       : "拒絕通報"
                                   }
