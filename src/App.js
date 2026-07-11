@@ -528,6 +528,7 @@ export default function App() {
               : rescueAIResult,
             timestamp: new Date().toISOString(),
             userId: user?.uid || "anonymous",
+            status: "pending", // 新通報預設為待審核，尚未同意/拒絕前不會出現在數據資料頁
           }
         );
         showToast("通報成功！");
@@ -1219,9 +1220,12 @@ export default function App() {
     const DataPageContent = () => {
       const [selectedReport, setSelectedReport] = React.useState(null);
 
-      const total = reports.length;
-      const recent = reports.slice(0, 5);
-      const markersData = reports
+      // 僅統計已審核通過（approved）的通報，待審核與已拒絕的不列入數據資料
+      const approvedReports = reports.filter((r) => r.status === "approved");
+
+      const total = approvedReports.length;
+      const recent = approvedReports.slice(0, 5);
+      const markersData = approvedReports
         .filter((r) => r.lat && r.lon)
         .map((r) => ({
           lat: parseFloat(r.lat),
@@ -1242,7 +1246,7 @@ export default function App() {
         chartData.push({ label: m, value: 0 });
       }
 
-      reports.forEach((r) => {
+      approvedReports.forEach((r) => {
         if (r.timestamp) {
           const d = new Date(r.timestamp);
           const m = `${d.getFullYear()}/${d.getMonth() + 1}`;
@@ -1255,7 +1259,7 @@ export default function App() {
       });
 
       const speciesCounts = {};
-      reports.forEach((r) => {
+      approvedReports.forEach((r) => {
         const s = r.species?.trim() || "未知鳥種";
         speciesCounts[s] = (speciesCounts[s] || 0) + 1;
       });
@@ -1561,9 +1565,12 @@ export default function App() {
             status: "",
             name: "",
             location: "",
+            lat: "",
+            lon: "",
             notes: "",
             aiResult: "",
           });
+          const editMapIframeRef = React.useRef(null);
 
           // 搜尋列專用的狀態
           const [searchTerm, setSearchTerm] = React.useState("");
@@ -1583,11 +1590,89 @@ export default function App() {
                 status: editingReport.status || "",
                 name: editingReport.name || "",
                 location: editingReport.location || "",
+                lat: editingReport.lat || "",
+                lon: editingReport.lon || "",
                 notes: editingReport.notes || "",
                 aiResult: editingReport.aiResult || "",
               });
             }
           }, [editingReport]);
+
+          // 監聽「修改資料」地圖的定位訊息（使用獨立事件類型，避免與救傷通報表單地圖互相干擾）
+          React.useEffect(() => {
+            const handleEditMapMessage = async (e) => {
+              if (e.data?.type === "PICK_LOCATION_EDIT") {
+                const { lat, lon, location: mapAddress } = e.data;
+
+                if (mapAddress) {
+                  setEditForm((prev) => ({ ...prev, lat, lon, location: mapAddress }));
+                  return;
+                }
+
+                try {
+                  const res = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=zh-TW`
+                  );
+                  const data = await res.json();
+
+                  if (data && data.address) {
+                    const a = data.address;
+                    const road = a.road || a.pedestrian || a.street || "";
+                    const num = a.house_number || "";
+                    const landmark =
+                      a.amenity || a.building || a.shop || a.tourism || a.leisure || "";
+                    const city = a.city || a.town || a.village || a.county || "";
+                    const district = a.suburb || a.district || "";
+
+                    let finalStr = "";
+                    if (road && num) {
+                      finalStr = `${city}${district}${road}${num}號`;
+                    } else if (road) {
+                      finalStr = `${city}${district}${road}附近`;
+                    } else if (landmark) {
+                      finalStr = `在 ${landmark} 附近 (${city}${district})`;
+                    } else if (data.display_name) {
+                      finalStr = data.display_name.split(",")[0];
+                    } else {
+                      finalStr = `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                    }
+                    setEditForm((prev) => ({ ...prev, lat, lon, location: finalStr }));
+                  } else {
+                    setEditForm((prev) => ({
+                      ...prev,
+                      lat,
+                      lon,
+                      location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+                    }));
+                  }
+                } catch (err) {
+                  setEditForm((prev) => ({
+                    ...prev,
+                    lat,
+                    lon,
+                    location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+                  }));
+                }
+              }
+            };
+            window.addEventListener("message", handleEditMapMessage);
+            return () => window.removeEventListener("message", handleEditMapMessage);
+          }, []);
+
+          // 當 editForm 的 lat/lon 改變時，同步更新修改資料地圖上的標記
+          React.useEffect(() => {
+            if (
+              editMapIframeRef.current &&
+              editMapIframeRef.current.contentWindow &&
+              editForm.lat &&
+              editForm.lon
+            ) {
+              editMapIframeRef.current.contentWindow.postMessage(
+                { type: "UPDATE_MAP", lat: editForm.lat, lon: editForm.lon },
+                "*"
+              );
+            }
+          }, [editForm.lat, editForm.lon]);
 
           // 資料過濾邏輯：動態過濾目前分頁的陣列
           const filteredItems = React.useMemo(() => {
@@ -2084,6 +2169,20 @@ export default function App() {
                             }
                           />
                         </div>
+                        <div>
+                          <label className="block text-sm font-semibold mb-2 text-slate-700">
+                            點擊地圖重新定位
+                          </label>
+                          <div className="h-48 rounded-xl overflow-hidden border border-teal-200/50">
+                            <iframe
+                              ref={editMapIframeRef}
+                              width="100%"
+                              height="100%"
+                              frameBorder="0"
+                              srcDoc={`<!DOCTYPE html><html><head><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script><style>body{margin:0;padding:0;}#map{width:100vw;height:100vh;cursor:crosshair;}</style></head><body><div id="map"></div><script>let map=L.map('map').setView([${editForm.lat || 23.5}, ${editForm.lon || 121.0}],${editForm.lat && editForm.lon ? 16 : 7});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);let marker${editForm.lat && editForm.lon ? `=L.marker([${editForm.lat}, ${editForm.lon}]).addTo(map)` : ""};L.Control.geocoder({defaultMarkGeocode:false,placeholder:"搜尋地址..."}).on('markgeocode',function(e){const center=e.geocode.center;map.setView(center,16);if(marker){marker.setLatLng(center);}else{marker=L.marker(center).addTo(map);}window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:center.lat,lon:center.lng,location:e.geocode.name},'*');}).addTo(map);map.on('click',function(e){if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:e.latlng.lat,lon:e.latlng.lng},'*');});window.addEventListener('message',function(e){if(e.data.type==='UPDATE_MAP'){map.setView([e.data.lat,e.data.lon],16);if(marker)marker.setLatLng([e.data.lat,e.data.lon]);else marker=L.marker([e.data.lat,e.data.lon]).addTo(map);}});</script></body></html>`}
+                            ></iframe>
+                          </div>
+                        </div>
                         {/* 顯示該筆通報的照片預覽，以符合原本表單雙欄結構的視覺平衡 */}
                         <div>
                           <label className="block text-sm font-semibold mb-2 text-slate-700">
@@ -2167,6 +2266,8 @@ export default function App() {
                                 status: editForm.status,
                                 name: editForm.name,
                                 location: editForm.location,
+                                lat: editForm.lat,
+                                lon: editForm.lon,
                                 notes: editForm.notes,
                                 aiResult: editForm.aiResult,
                               }
