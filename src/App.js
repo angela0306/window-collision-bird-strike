@@ -186,6 +186,751 @@ const Button = ({
 };
 
 // ==========================================
+// 3-1. 後台管理頁面內容（獨立元件，避免每次上層重新渲染時被整個卸載重建）
+// ==========================================
+function AdminPageContent({
+  reports,
+  contactMessages,
+  personnel,
+  adminView,
+  setAdminView,
+  showToast,
+  setDeleteTarget,
+  setIsAdminAuth,
+}) {
+  const [editingReport, setEditingReport] = React.useState(null);
+  const [editForm, setEditForm] = React.useState({
+    species: "",
+    status: "",
+    name: "",
+    location: "",
+    lat: "",
+    lon: "",
+    notes: "",
+    aiResult: "",
+  });
+  const editMapIframeRef = React.useRef(null);
+
+  // 搜尋列專用的狀態
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [searchField, setSearchField] = React.useState("all");
+
+  // 切換分頁時，自動清空搜尋關鍵字
+  React.useEffect(() => {
+    setSearchTerm("");
+    setSearchField("all");
+  }, [adminView]);
+
+  // 當點選修改時，自動帶入原本的資料
+  React.useEffect(() => {
+    if (editingReport) {
+      setEditForm({
+        species: editingReport.species || "",
+        status: editingReport.status || "",
+        name: editingReport.name || "",
+        location: editingReport.location || "",
+        lat: editingReport.lat || "",
+        lon: editingReport.lon || "",
+        notes: editingReport.notes || "",
+        aiResult: editingReport.aiResult || "",
+      });
+    }
+  }, [editingReport]);
+
+  // 監聽「修改資料」地圖的定位訊息（使用獨立事件類型，避免與救傷通報表單地圖互相干擾）
+  React.useEffect(() => {
+    const handleEditMapMessage = async (e) => {
+      if (e.data?.type === "PICK_LOCATION_EDIT") {
+        const { lat, lon, location: mapAddress } = e.data;
+
+        if (mapAddress) {
+          setEditForm((prev) => ({ ...prev, lat, lon, location: mapAddress }));
+          return;
+        }
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=zh-TW`
+          );
+          const data = await res.json();
+
+          if (data && data.address) {
+            const a = data.address;
+            const road = a.road || a.pedestrian || a.street || "";
+            const num = a.house_number || "";
+            const landmark =
+              a.amenity || a.building || a.shop || a.tourism || a.leisure || "";
+            const city = a.city || a.town || a.village || a.county || "";
+            const district = a.suburb || a.district || "";
+
+            let finalStr = "";
+            if (road && num) {
+              finalStr = `${city}${district}${road}${num}號`;
+            } else if (road) {
+              finalStr = `${city}${district}${road}附近`;
+            } else if (landmark) {
+              finalStr = `在 ${landmark} 附近 (${city}${district})`;
+            } else if (data.display_name) {
+              finalStr = data.display_name.split(",")[0];
+            } else {
+              finalStr = `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+            }
+            setEditForm((prev) => ({ ...prev, lat, lon, location: finalStr }));
+          } else {
+            setEditForm((prev) => ({
+              ...prev,
+              lat,
+              lon,
+              location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+            }));
+          }
+        } catch (err) {
+          setEditForm((prev) => ({
+            ...prev,
+            lat,
+            lon,
+            location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+          }));
+        }
+      }
+    };
+    window.addEventListener("message", handleEditMapMessage);
+    return () => window.removeEventListener("message", handleEditMapMessage);
+  }, []);
+
+  // 當 editForm 的 lat/lon 改變時，同步更新修改資料地圖上的標記
+  React.useEffect(() => {
+    if (
+      editMapIframeRef.current &&
+      editMapIframeRef.current.contentWindow &&
+      editForm.lat &&
+      editForm.lon
+    ) {
+      editMapIframeRef.current.contentWindow.postMessage(
+        { type: "UPDATE_MAP", lat: editForm.lat, lon: editForm.lon },
+        "*"
+      );
+    }
+  }, [editForm.lat, editForm.lon]);
+
+  // 資料過濾邏輯：動態過濾目前分頁的陣列
+  const filteredItems = React.useMemo(() => {
+    const currentData =
+      adminView === "reports"
+        ? reports
+        : adminView === "contacts"
+        ? contactMessages
+        : personnel;
+    if (!searchTerm.trim()) return currentData;
+
+    const term = searchTerm.toLowerCase().trim();
+
+    const matchValue = (val, isTime = false) => {
+      if (!val) return false;
+      if (isTime) {
+        return new Date(val)
+          .toLocaleString()
+          .toLowerCase()
+          .includes(term);
+      }
+      return String(val).toLowerCase().includes(term);
+    };
+
+    return currentData.filter((item) => {
+      if (searchField === "all") {
+        if (adminView === "reports") {
+          return (
+            matchValue(item.timestamp, true) ||
+            matchValue(item.species) ||
+            matchValue(item.location) ||
+            matchValue(item.aiResult)
+          );
+        } else if (adminView === "contacts") {
+          return (
+            matchValue(item.timestamp, true) ||
+            matchValue(item.name) ||
+            matchValue(item.type) ||
+            matchValue(item.message)
+          );
+        } else {
+          return (
+            matchValue(item.timestamp, true) ||
+            matchValue(item.name) ||
+            matchValue(item.email) ||
+            matchValue(item.uid)
+          );
+        }
+      }
+
+      if (searchField === "time")
+        return matchValue(item.timestamp, true);
+
+      if (adminView === "reports") {
+        if (searchField === "species") return matchValue(item.species);
+        if (searchField === "location")
+          return matchValue(item.location);
+        if (searchField === "aiResult")
+          return matchValue(item.aiResult);
+      } else if (adminView === "contacts") {
+        if (searchField === "name") return matchValue(item.name);
+        if (searchField === "type") return matchValue(item.type);
+        if (searchField === "message") return matchValue(item.message);
+      } else if (adminView === "personnel") {
+        if (searchField === "name") return matchValue(item.name);
+        if (searchField === "email") return matchValue(item.email);
+        if (searchField === "uid") return matchValue(item.uid);
+      }
+      return false;
+    });
+  }, [
+    adminView,
+    reports,
+    contactMessages,
+    personnel,
+    searchTerm,
+    searchField,
+  ]);
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
+      <GlassCard className="flex justify-between items-center flex-wrap gap-4">
+        <div className="flex items-center gap-4">
+          <h2 className="text-2xl font-bold text-teal-800 flex items-center gap-2">
+            <Settings /> 資料庫管理
+          </h2>
+          <div className="bg-white/50 p-1 rounded-xl flex">
+            <button
+              onClick={() => setAdminView("reports")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
+                adminView === "reports"
+                  ? "bg-teal-500 text-white"
+                  : "text-slate-600"
+              }`}
+            >
+              通報
+            </button>
+            <button
+              onClick={() => setAdminView("contacts")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
+                adminView === "contacts"
+                  ? "bg-teal-500 text-white"
+                  : "text-slate-600"
+              }`}
+            >
+              聯絡
+            </button>
+            <button
+              onClick={() => setAdminView("personnel")}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
+                adminView === "personnel"
+                  ? "bg-teal-500 text-white"
+                  : "text-slate-600"
+              }`}
+            >
+              會員
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsAdminAuth(false)}
+          className="p-2 px-3 rounded-xl text-amber-600 hover:bg-amber-100 flex items-center gap-1 text-sm font-bold bg-white/50"
+        >
+          <LogOut size={18} /> 退出
+        </button>
+      </GlassCard>
+
+      <GlassCard className="p-0 overflow-hidden">
+        {/* 搜尋欄位 UI */}
+        <div className="p-4 bg-white/30 border-b border-white/20 flex gap-3 items-center flex-wrap">
+          <input
+            type="text"
+            placeholder="輸入關鍵字搜尋..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="flex-1 min-w-[200px] p-2 px-3 rounded-xl bg-white/60 border border-teal-200/50 outline-none focus:ring-2 focus:ring-teal-500 text-sm text-slate-800"
+          />
+          <select
+            value={searchField}
+            onChange={(e) => setSearchField(e.target.value)}
+            className="p-2 px-3 rounded-xl bg-white/60 border border-teal-200/50 outline-none text-sm text-slate-700 font-semibold cursor-pointer"
+          >
+            <option value="all">全部欄位</option>
+            {adminView === "reports" && (
+              <>
+                <option value="time">時間</option>
+                <option value="species">鳥種</option>
+                <option value="location">地點</option>
+                <option value="aiResult">AI摘要</option>
+              </>
+            )}
+            {adminView === "contacts" && (
+              <>
+                <option value="time">時間</option>
+                <option value="name">單位/姓名</option>
+                <option value="type">類型</option>
+                <option value="message">內容</option>
+              </>
+            )}
+            {adminView === "personnel" && (
+              <>
+                <option value="time">最後登入時間</option>
+                <option value="name">姓名</option>
+                <option value="email">信箱</option>
+                <option value="uid">使用者 ID</option>
+              </>
+            )}
+          </select>
+        </div>
+
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-teal-600/10 text-teal-800">
+            <tr>
+              {adminView === "reports" ? (
+                <>
+                  <th className="p-4 whitespace-nowrap">時間</th>
+                  <th className="p-4 whitespace-nowrap">鳥種</th>
+                  <th className="p-4 whitespace-nowrap">地點</th>
+                  <th className="p-4 whitespace-nowrap">AI摘要</th>
+                </>
+              ) : adminView === "contacts" ? (
+                <>
+                  <th className="p-4 whitespace-nowrap">時間</th>
+                  <th className="p-4 whitespace-nowrap">單位/姓名</th>
+                  <th className="p-4 whitespace-nowrap">類型</th>
+                  <th className="p-4 whitespace-nowrap">內容</th>
+                </>
+              ) : (
+                <>
+                  <th className="p-4 whitespace-nowrap">
+                    最後登入時間
+                  </th>
+                  <th className="p-4 whitespace-nowrap">姓名</th>
+                  <th className="p-4 whitespace-nowrap">信箱</th>
+                  <th className="p-4 whitespace-nowrap">使用者 ID</th>
+                </>
+              )}
+              <th className="p-4 text-center">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/20">
+            {filteredItems.map((item) => (
+              <tr key={item.id} className="hover:bg-white/20">
+                <td className="p-4 text-sm">
+                  {item.timestamp
+                    ? new Date(item.timestamp).toLocaleString()
+                    : "未知"}
+                </td>
+                <td className="p-4 font-bold">
+                  {adminView === "reports"
+                    ? item.species
+                    : adminView === "contacts"
+                    ? item.name
+                    : item.name}
+                </td>
+                <td className="p-4 text-sm">
+                  {adminView === "reports"
+                    ? item.location
+                    : adminView === "contacts"
+                    ? item.type
+                    : item.email}
+                </td>
+                <td className="p-4 text-sm max-w-[200px] truncate">
+                  {adminView === "reports"
+                    ? item.aiResult
+                    : adminView === "contacts"
+                    ? item.message
+                    : item.uid}
+                </td>
+                <td className="p-4 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    {/* 1. 通報分頁：加入審核鎖定狀態 */}
+                    {adminView === "reports" && (
+                      <>
+                        {/* 同意通報：綠色勾勾（已審核則禁用） */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { updateDoc, doc } = await import(
+                                "firebase/firestore"
+                              );
+                              await updateDoc(
+                                doc(
+                                  db,
+                                  "artifacts",
+                                  globalAppId,
+                                  "public",
+                                  "data",
+                                  "bird_reports",
+                                  item.id
+                                ),
+                                { reviewStatus: "approved" }
+                              );
+                              showToast("已同意通報並登錄");
+                            } catch (e) {
+                              showToast("操作失敗", "error");
+                            }
+                          }}
+                          disabled={
+                            item.reviewStatus === "approved" ||
+                            item.reviewStatus === "rejected"
+                          }
+                          className="p-1.5 text-emerald-500 hover:bg-emerald-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            item.reviewStatus === "approved"
+                              ? "已同意"
+                              : item.reviewStatus === "rejected"
+                              ? "已審核(拒絕)"
+                              : "同意通報"
+                          }
+                        >
+                          <Check size={18} />
+                        </button>
+
+                        {/* 拒絕通報：紅色叉叉（已審核則禁用） */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { updateDoc, doc } = await import(
+                                "firebase/firestore"
+                              );
+                              await updateDoc(
+                                doc(
+                                  db,
+                                  "artifacts",
+                                  globalAppId,
+                                  "public",
+                                  "data",
+                                  "bird_reports",
+                                  item.id
+                                ),
+                                { reviewStatus: "rejected" }
+                              );
+                              showToast("已拒絕該筆通報");
+                            } catch (e) {
+                              showToast("操作失敗", "error");
+                            }
+                          }}
+                          disabled={
+                            item.reviewStatus === "approved" ||
+                            item.reviewStatus === "rejected"
+                          }
+                          className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            item.reviewStatus === "rejected"
+                              ? "已拒絕"
+                              : item.reviewStatus === "approved"
+                              ? "已審核(同意)"
+                              : "拒絕通報"
+                          }
+                        >
+                          <X size={18} />
+                        </button>
+
+                        {/* 修改通報資料：筆 */}
+                        <button
+                          onClick={() => setEditingReport(item)}
+                          className="p-1.5 text-blue-500 hover:bg-blue-100 rounded-lg transition-colors"
+                          title="修改資料"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+
+                        {/* 刪除按鈕 */}
+                        <button
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: item.id,
+                              type: "report",
+                            })
+                          }
+                          className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+                          title="刪除"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </>
+                    )}
+
+                    {/* 2. 聯絡分頁：維持原樣 */}
+                    {adminView === "contacts" && (
+                      <button
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: item.id,
+                            type: "contact",
+                          })
+                        }
+                        className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+                        title="刪除"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
+
+                    {/* 3. 會員分頁：改為網頁中的地位五級權限管理（擁有者鎖定） */}
+                    {adminView === "personnel" && (
+                      <select
+                        value={
+                          item.email === "angela1010306@gmail.com"
+                            ? "擁有者"
+                            : item.role || "一般民眾"
+                        }
+                        disabled={
+                          item.email === "angela1010306@gmail.com"
+                        }
+                        onChange={async (e) => {
+                          const newRole = e.target.value;
+                          try {
+                            const { updateDoc, doc } = await import(
+                              "firebase/firestore"
+                            );
+                            await updateDoc(
+                              doc(
+                                db,
+                                "artifacts",
+                                globalAppId,
+                                "public",
+                                "data",
+                                "personnel",
+                                item.id
+                              ),
+                              { role: newRole }
+                            );
+                            showToast(
+                              `已成功將權限變更為：${newRole}`
+                            );
+                          } catch (err) {
+                            showToast("變更權限失敗", "error");
+                          }
+                        }}
+                        className="bg-white border border-teal-200 rounded-xl p-1 px-2 text-xs outline-none text-slate-700 font-semibold disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      >
+                        {item.email === "angela1010306@gmail.com" ? (
+                          <option value="擁有者">擁有者</option>
+                        ) : (
+                          <>
+                            <option value="管理者">管理者</option>
+                            <option value="VIP">VIP</option>
+                            <option value="一般民眾">一般民眾</option>
+                            <option value="停權">停權</option>
+                            <option value="黑名單">黑名單</option>
+                          </>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </GlassCard>
+
+      {/* 管理員修改資料彈出視窗 (Modal) */}
+      {editingReport && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[100] p-4"
+          onClick={() => setEditingReport(null)}
+        >
+          <div
+            className="bg-white border border-teal-100 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-y-auto max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 text-xl font-bold"
+              onClick={() => setEditingReport(null)}
+            >
+              ✕
+            </button>
+
+            <h2 className="text-3xl font-extrabold text-teal-800 mb-8 flex items-center gap-3">
+              <Edit2 className="text-emerald-500" /> 修改通報資料
+            </h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    鳥類資訊
+                  </label>
+                  <div className="flex gap-4">
+                    <input
+                      type="text"
+                      placeholder="鳥種"
+                      className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
+                      value={editForm.species}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          species: e.target.value,
+                        })
+                      }
+                    />
+                    <select
+                      className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
+                      value={editForm.status}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          status: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="" disabled>
+                        請選擇狀態
+                      </option>
+                      <option value="受傷">受傷</option>
+                      <option value="生病">生病</option>
+                      <option value="落巢/幼鳥">落巢/幼鳥</option>
+                      <option value="死亡">死亡</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <input
+                    type="text"
+                    placeholder="姓名 *"
+                    className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
+                    value={editForm.name}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, name: e.target.value })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="地點"
+                    className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
+                    value={editForm.location}
+                    onChange={(e) =>
+                      setEditForm({
+                        ...editForm,
+                        location: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-slate-700">
+                    點擊地圖重新定位
+                  </label>
+                  <div className="h-48 rounded-xl overflow-hidden border border-teal-200/50">
+                    <iframe
+                      ref={editMapIframeRef}
+                      width="100%"
+                      height="100%"
+                      frameBorder="0"
+                      srcDoc={`<!DOCTYPE html><html><head><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script><style>body{margin:0;padding:0;}#map{width:100vw;height:100vh;cursor:crosshair;}</style></head><body><div id="map"></div><script>let map=L.map('map').setView([${editForm.lat || 23.5}, ${editForm.lon || 121.0}],${editForm.lat && editForm.lon ? 16 : 7});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);let marker${editForm.lat && editForm.lon ? `=L.marker([${editForm.lat}, ${editForm.lon}]).addTo(map)` : ""};L.Control.geocoder({defaultMarkGeocode:false,placeholder:"搜尋地址..."}).on('markgeocode',function(e){const center=e.geocode.center;map.setView(center,16);if(marker){marker.setLatLng(center);}else{marker=L.marker(center).addTo(map);}window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:center.lat,lon:center.lng,location:e.geocode.name},'*');}).addTo(map);map.on('click',function(e){if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:e.latlng.lat,lon:e.latlng.lng},'*');});window.addEventListener('message',function(e){if(e.data.type==='UPDATE_MAP'){map.setView([e.data.lat,e.data.lon],16);if(marker)marker.setLatLng([e.data.lat,e.data.lon]);else marker=L.marker([e.data.lat,e.data.lon]).addTo(map);}});</script></body></html>`}
+                    ></iframe>
+                  </div>
+                </div>
+                {/* 顯示該筆通報的照片預覽，以符合原本表單雙欄結構的視覺平衡 */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-slate-700">
+                    通報照片
+                  </label>
+                  {editingReport.photo ? (
+                    <img
+                      src={editingReport.photo}
+                      className="w-full h-48 object-cover rounded-xl shadow-md"
+                      alt="通報照片"
+                    />
+                  ) : (
+                    <div className="w-full h-48 bg-slate-50 rounded-xl flex items-center justify-center border border-dashed border-teal-200 text-slate-400">
+                      無照片
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-slate-700">
+                    AI 辨識結果 (可手動修改)
+                  </label>
+                  <textarea
+                    className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 h-40 text-sm outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
+                    placeholder="AI 辨識結果..."
+                    value={editForm.aiResult}
+                    onChange={(e) =>
+                      setEditForm({
+                        ...editForm,
+                        aiResult: e.target.value,
+                      })
+                    }
+                  ></textarea>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-slate-700">
+                    其他備註事項
+                  </label>
+                  <textarea
+                    className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 h-32 outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
+                    placeholder="其他備註事項..."
+                    value={editForm.notes}
+                    onChange={(e) =>
+                      setEditForm({
+                        ...editForm,
+                        notes: e.target.value,
+                      })
+                    }
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 flex gap-4 justify-end border-t border-slate-100 pt-6">
+              <button
+                onClick={() => setEditingReport(null)}
+                className="px-8 py-3 rounded-xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const { updateDoc, doc } = await import(
+                      "firebase/firestore"
+                    );
+                    await updateDoc(
+                      doc(
+                        db,
+                        "artifacts",
+                        globalAppId,
+                        "public",
+                        "data",
+                        "bird_reports",
+                        editingReport.id
+                      ),
+                      {
+                        species: editForm.species,
+                        status: editForm.status,
+                        name: editForm.name,
+                        location: editForm.location,
+                        lat: editForm.lat,
+                        lon: editForm.lon,
+                        notes: editForm.notes,
+                        aiResult: editForm.aiResult,
+                      }
+                    );
+                    showToast("修改成功");
+                    setEditingReport(null);
+                  } catch (e) {
+                    showToast("修改失敗", "error");
+                  }
+                }}
+                className="px-8 py-3 rounded-xl font-bold bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-md hover:shadow-lg transition-all flex items-center gap-2"
+              >
+                <Check size={18} /> 儲存變更
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
 // 4. 主應用程式 (Single Page App)
 // ==========================================
 export default function App() {
@@ -1615,741 +2360,16 @@ export default function App() {
         </GlassCard>
       </div>
     ) : (
-      (() => {
-        // 宣告修改資料專用的局部狀態，不破壞全域結構
-        const AdminPageContent = () => {
-          const [editingReport, setEditingReport] = React.useState(null);
-          const [editForm, setEditForm] = React.useState({
-            species: "",
-            status: "",
-            name: "",
-            location: "",
-            lat: "",
-            lon: "",
-            notes: "",
-            aiResult: "",
-          });
-          const editMapIframeRef = React.useRef(null);
-
-          // 搜尋列專用的狀態
-          const [searchTerm, setSearchTerm] = React.useState("");
-          const [searchField, setSearchField] = React.useState("all");
-
-          // 切換分頁時，自動清空搜尋關鍵字
-          React.useEffect(() => {
-            setSearchTerm("");
-            setSearchField("all");
-          }, [adminView]);
-
-          // 當點選修改時，自動帶入原本的資料
-          React.useEffect(() => {
-            if (editingReport) {
-              setEditForm({
-                species: editingReport.species || "",
-                status: editingReport.status || "",
-                name: editingReport.name || "",
-                location: editingReport.location || "",
-                lat: editingReport.lat || "",
-                lon: editingReport.lon || "",
-                notes: editingReport.notes || "",
-                aiResult: editingReport.aiResult || "",
-              });
-            }
-          }, [editingReport]);
-
-          // 監聽「修改資料」地圖的定位訊息（使用獨立事件類型，避免與救傷通報表單地圖互相干擾）
-          React.useEffect(() => {
-            const handleEditMapMessage = async (e) => {
-              if (e.data?.type === "PICK_LOCATION_EDIT") {
-                const { lat, lon, location: mapAddress } = e.data;
-
-                if (mapAddress) {
-                  setEditForm((prev) => ({ ...prev, lat, lon, location: mapAddress }));
-                  return;
-                }
-
-                try {
-                  const res = await fetch(
-                    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=zh-TW`
-                  );
-                  const data = await res.json();
-
-                  if (data && data.address) {
-                    const a = data.address;
-                    const road = a.road || a.pedestrian || a.street || "";
-                    const num = a.house_number || "";
-                    const landmark =
-                      a.amenity || a.building || a.shop || a.tourism || a.leisure || "";
-                    const city = a.city || a.town || a.village || a.county || "";
-                    const district = a.suburb || a.district || "";
-
-                    let finalStr = "";
-                    if (road && num) {
-                      finalStr = `${city}${district}${road}${num}號`;
-                    } else if (road) {
-                      finalStr = `${city}${district}${road}附近`;
-                    } else if (landmark) {
-                      finalStr = `在 ${landmark} 附近 (${city}${district})`;
-                    } else if (data.display_name) {
-                      finalStr = data.display_name.split(",")[0];
-                    } else {
-                      finalStr = `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                    }
-                    setEditForm((prev) => ({ ...prev, lat, lon, location: finalStr }));
-                  } else {
-                    setEditForm((prev) => ({
-                      ...prev,
-                      lat,
-                      lon,
-                      location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
-                    }));
-                  }
-                } catch (err) {
-                  setEditForm((prev) => ({
-                    ...prev,
-                    lat,
-                    lon,
-                    location: `座標: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
-                  }));
-                }
-              }
-            };
-            window.addEventListener("message", handleEditMapMessage);
-            return () => window.removeEventListener("message", handleEditMapMessage);
-          }, []);
-
-          // 當 editForm 的 lat/lon 改變時，同步更新修改資料地圖上的標記
-          React.useEffect(() => {
-            if (
-              editMapIframeRef.current &&
-              editMapIframeRef.current.contentWindow &&
-              editForm.lat &&
-              editForm.lon
-            ) {
-              editMapIframeRef.current.contentWindow.postMessage(
-                { type: "UPDATE_MAP", lat: editForm.lat, lon: editForm.lon },
-                "*"
-              );
-            }
-          }, [editForm.lat, editForm.lon]);
-
-          // 資料過濾邏輯：動態過濾目前分頁的陣列
-          const filteredItems = React.useMemo(() => {
-            const currentData =
-              adminView === "reports"
-                ? reports
-                : adminView === "contacts"
-                ? contactMessages
-                : personnel;
-            if (!searchTerm.trim()) return currentData;
-
-            const term = searchTerm.toLowerCase().trim();
-
-            const matchValue = (val, isTime = false) => {
-              if (!val) return false;
-              if (isTime) {
-                return new Date(val)
-                  .toLocaleString()
-                  .toLowerCase()
-                  .includes(term);
-              }
-              return String(val).toLowerCase().includes(term);
-            };
-
-            return currentData.filter((item) => {
-              if (searchField === "all") {
-                if (adminView === "reports") {
-                  return (
-                    matchValue(item.timestamp, true) ||
-                    matchValue(item.species) ||
-                    matchValue(item.location) ||
-                    matchValue(item.aiResult)
-                  );
-                } else if (adminView === "contacts") {
-                  return (
-                    matchValue(item.timestamp, true) ||
-                    matchValue(item.name) ||
-                    matchValue(item.type) ||
-                    matchValue(item.message)
-                  );
-                } else {
-                  return (
-                    matchValue(item.timestamp, true) ||
-                    matchValue(item.name) ||
-                    matchValue(item.email) ||
-                    matchValue(item.uid)
-                  );
-                }
-              }
-
-              if (searchField === "time")
-                return matchValue(item.timestamp, true);
-
-              if (adminView === "reports") {
-                if (searchField === "species") return matchValue(item.species);
-                if (searchField === "location")
-                  return matchValue(item.location);
-                if (searchField === "aiResult")
-                  return matchValue(item.aiResult);
-              } else if (adminView === "contacts") {
-                if (searchField === "name") return matchValue(item.name);
-                if (searchField === "type") return matchValue(item.type);
-                if (searchField === "message") return matchValue(item.message);
-              } else if (adminView === "personnel") {
-                if (searchField === "name") return matchValue(item.name);
-                if (searchField === "email") return matchValue(item.email);
-                if (searchField === "uid") return matchValue(item.uid);
-              }
-              return false;
-            });
-          }, [
-            adminView,
-            reports,
-            contactMessages,
-            personnel,
-            searchTerm,
-            searchField,
-          ]);
-
-          return (
-            <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
-              <GlassCard className="flex justify-between items-center flex-wrap gap-4">
-                <div className="flex items-center gap-4">
-                  <h2 className="text-2xl font-bold text-teal-800 flex items-center gap-2">
-                    <Settings /> 資料庫管理
-                  </h2>
-                  <div className="bg-white/50 p-1 rounded-xl flex">
-                    <button
-                      onClick={() => setAdminView("reports")}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
-                        adminView === "reports"
-                          ? "bg-teal-500 text-white"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      通報
-                    </button>
-                    <button
-                      onClick={() => setAdminView("contacts")}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
-                        adminView === "contacts"
-                          ? "bg-teal-500 text-white"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      聯絡
-                    </button>
-                    <button
-                      onClick={() => setAdminView("personnel")}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-bold ${
-                        adminView === "personnel"
-                          ? "bg-teal-500 text-white"
-                          : "text-slate-600"
-                      }`}
-                    >
-                      會員
-                    </button>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsAdminAuth(false)}
-                  className="p-2 px-3 rounded-xl text-amber-600 hover:bg-amber-100 flex items-center gap-1 text-sm font-bold bg-white/50"
-                >
-                  <LogOut size={18} /> 退出
-                </button>
-              </GlassCard>
-
-              <GlassCard className="p-0 overflow-hidden">
-                {/* 搜尋欄位 UI */}
-                <div className="p-4 bg-white/30 border-b border-white/20 flex gap-3 items-center flex-wrap">
-                  <input
-                    type="text"
-                    placeholder="輸入關鍵字搜尋..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="flex-1 min-w-[200px] p-2 px-3 rounded-xl bg-white/60 border border-teal-200/50 outline-none focus:ring-2 focus:ring-teal-500 text-sm text-slate-800"
-                  />
-                  <select
-                    value={searchField}
-                    onChange={(e) => setSearchField(e.target.value)}
-                    className="p-2 px-3 rounded-xl bg-white/60 border border-teal-200/50 outline-none text-sm text-slate-700 font-semibold cursor-pointer"
-                  >
-                    <option value="all">全部欄位</option>
-                    {adminView === "reports" && (
-                      <>
-                        <option value="time">時間</option>
-                        <option value="species">鳥種</option>
-                        <option value="location">地點</option>
-                        <option value="aiResult">AI摘要</option>
-                      </>
-                    )}
-                    {adminView === "contacts" && (
-                      <>
-                        <option value="time">時間</option>
-                        <option value="name">單位/姓名</option>
-                        <option value="type">類型</option>
-                        <option value="message">內容</option>
-                      </>
-                    )}
-                    {adminView === "personnel" && (
-                      <>
-                        <option value="time">最後登入時間</option>
-                        <option value="name">姓名</option>
-                        <option value="email">信箱</option>
-                        <option value="uid">使用者 ID</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-teal-600/10 text-teal-800">
-                    <tr>
-                      {adminView === "reports" ? (
-                        <>
-                          <th className="p-4 whitespace-nowrap">時間</th>
-                          <th className="p-4 whitespace-nowrap">鳥種</th>
-                          <th className="p-4 whitespace-nowrap">地點</th>
-                          <th className="p-4 whitespace-nowrap">AI摘要</th>
-                        </>
-                      ) : adminView === "contacts" ? (
-                        <>
-                          <th className="p-4 whitespace-nowrap">時間</th>
-                          <th className="p-4 whitespace-nowrap">單位/姓名</th>
-                          <th className="p-4 whitespace-nowrap">類型</th>
-                          <th className="p-4 whitespace-nowrap">內容</th>
-                        </>
-                      ) : (
-                        <>
-                          <th className="p-4 whitespace-nowrap">
-                            最後登入時間
-                          </th>
-                          <th className="p-4 whitespace-nowrap">姓名</th>
-                          <th className="p-4 whitespace-nowrap">信箱</th>
-                          <th className="p-4 whitespace-nowrap">使用者 ID</th>
-                        </>
-                      )}
-                      <th className="p-4 text-center">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/20">
-                    {filteredItems.map((item) => (
-                      <tr key={item.id} className="hover:bg-white/20">
-                        <td className="p-4 text-sm">
-                          {item.timestamp
-                            ? new Date(item.timestamp).toLocaleString()
-                            : "未知"}
-                        </td>
-                        <td className="p-4 font-bold">
-                          {adminView === "reports"
-                            ? item.species
-                            : adminView === "contacts"
-                            ? item.name
-                            : item.name}
-                        </td>
-                        <td className="p-4 text-sm">
-                          {adminView === "reports"
-                            ? item.location
-                            : adminView === "contacts"
-                            ? item.type
-                            : item.email}
-                        </td>
-                        <td className="p-4 text-sm max-w-[200px] truncate">
-                          {adminView === "reports"
-                            ? item.aiResult
-                            : adminView === "contacts"
-                            ? item.message
-                            : item.uid}
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {/* 1. 通報分頁：加入審核鎖定狀態 */}
-                            {adminView === "reports" && (
-                              <>
-                                {/* 同意通報：綠色勾勾（已審核則禁用） */}
-                                <button
-                                  onClick={async () => {
-                                    try {
-                                      const { updateDoc, doc } = await import(
-                                        "firebase/firestore"
-                                      );
-                                      await updateDoc(
-                                        doc(
-                                          db,
-                                          "artifacts",
-                                          globalAppId,
-                                          "public",
-                                          "data",
-                                          "bird_reports",
-                                          item.id
-                                        ),
-                                        { reviewStatus: "approved" }
-                                      );
-                                      showToast("已同意通報並登錄");
-                                    } catch (e) {
-                                      showToast("操作失敗", "error");
-                                    }
-                                  }}
-                                  disabled={
-                                    item.reviewStatus === "approved" ||
-                                    item.reviewStatus === "rejected"
-                                  }
-                                  className="p-1.5 text-emerald-500 hover:bg-emerald-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  title={
-                                    item.reviewStatus === "approved"
-                                      ? "已同意"
-                                      : item.reviewStatus === "rejected"
-                                      ? "已審核(拒絕)"
-                                      : "同意通報"
-                                  }
-                                >
-                                  <Check size={18} />
-                                </button>
-
-                                {/* 拒絕通報：紅色叉叉（已審核則禁用） */}
-                                <button
-                                  onClick={async () => {
-                                    try {
-                                      const { updateDoc, doc } = await import(
-                                        "firebase/firestore"
-                                      );
-                                      await updateDoc(
-                                        doc(
-                                          db,
-                                          "artifacts",
-                                          globalAppId,
-                                          "public",
-                                          "data",
-                                          "bird_reports",
-                                          item.id
-                                        ),
-                                        { reviewStatus: "rejected" }
-                                      );
-                                      showToast("已拒絕該筆通報");
-                                    } catch (e) {
-                                      showToast("操作失敗", "error");
-                                    }
-                                  }}
-                                  disabled={
-                                    item.reviewStatus === "approved" ||
-                                    item.reviewStatus === "rejected"
-                                  }
-                                  className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  title={
-                                    item.reviewStatus === "rejected"
-                                      ? "已拒絕"
-                                      : item.reviewStatus === "approved"
-                                      ? "已審核(同意)"
-                                      : "拒絕通報"
-                                  }
-                                >
-                                  <X size={18} />
-                                </button>
-
-                                {/* 修改通報資料：筆 */}
-                                <button
-                                  onClick={() => setEditingReport(item)}
-                                  className="p-1.5 text-blue-500 hover:bg-blue-100 rounded-lg transition-colors"
-                                  title="修改資料"
-                                >
-                                  <Edit2 size={18} />
-                                </button>
-
-                                {/* 刪除按鈕 */}
-                                <button
-                                  onClick={() =>
-                                    setDeleteTarget({
-                                      id: item.id,
-                                      type: "report",
-                                    })
-                                  }
-                                  className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
-                                  title="刪除"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
-                              </>
-                            )}
-
-                            {/* 2. 聯絡分頁：維持原樣 */}
-                            {adminView === "contacts" && (
-                              <button
-                                onClick={() =>
-                                  setDeleteTarget({
-                                    id: item.id,
-                                    type: "contact",
-                                  })
-                                }
-                                className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
-                                title="刪除"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            )}
-
-                            {/* 3. 會員分頁：改為網頁中的地位五級權限管理（擁有者鎖定） */}
-                            {adminView === "personnel" && (
-                              <select
-                                value={
-                                  item.email === "angela1010306@gmail.com"
-                                    ? "擁有者"
-                                    : item.role || "一般民眾"
-                                }
-                                disabled={
-                                  item.email === "angela1010306@gmail.com"
-                                }
-                                onChange={async (e) => {
-                                  try {
-                                    const { updateDoc, doc } = await import(
-                                      "firebase/firestore"
-                                    );
-                                    await updateDoc(
-                                      doc(
-                                        db,
-                                        "artifacts",
-                                        globalAppId,
-                                        "public",
-                                        "data",
-                                        "personnel",
-                                        item.id
-                                      ),
-                                      { role: e.target.value }
-                                    );
-                                    showToast(
-                                      `已成功將權限變更為：${e.target.value}`
-                                    );
-                                  } catch (err) {
-                                    showToast("變更權限失敗", "error");
-                                  }
-                                }}
-                                className="bg-white border border-teal-200 rounded-xl p-1 px-2 text-xs outline-none text-slate-700 font-semibold disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
-                              >
-                                {item.email === "angela1010306@gmail.com" ? (
-                                  <option value="擁有者">擁有者</option>
-                                ) : (
-                                  <>
-                                    <option value="管理者">管理者</option>
-                                    <option value="VIP">VIP</option>
-                                    <option value="一般民眾">一般民眾</option>
-                                    <option value="停權">停權</option>
-                                    <option value="黑名單">黑名單</option>
-                                  </>
-                                )}
-                              </select>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </GlassCard>
-
-              {/* 管理員修改資料彈出視窗 (Modal) */}
-              {editingReport && (
-                <div
-                  className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[100] p-4"
-                  onClick={() => setEditingReport(null)}
-                >
-                  <div
-                    className="bg-white border border-teal-100 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-y-auto max-h-[90vh]"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 text-xl font-bold"
-                      onClick={() => setEditingReport(null)}
-                    >
-                      ✕
-                    </button>
-
-                    <h2 className="text-3xl font-extrabold text-teal-800 mb-8 flex items-center gap-3">
-                      <Edit2 className="text-emerald-500" /> 修改通報資料
-                    </h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      <div className="space-y-6">
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">
-                            鳥類資訊
-                          </label>
-                          <div className="flex gap-4">
-                            <input
-                              type="text"
-                              placeholder="鳥種"
-                              className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
-                              value={editForm.species}
-                              onChange={(e) =>
-                                setEditForm({
-                                  ...editForm,
-                                  species: e.target.value,
-                                })
-                              }
-                            />
-                            <select
-                              className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
-                              value={editForm.status}
-                              onChange={(e) =>
-                                setEditForm({
-                                  ...editForm,
-                                  status: e.target.value,
-                                })
-                              }
-                            >
-                              <option value="" disabled>
-                                請選擇狀態
-                              </option>
-                              <option value="受傷">受傷</option>
-                              <option value="生病">生病</option>
-                              <option value="落巢/幼鳥">落巢/幼鳥</option>
-                              <option value="死亡">死亡</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div className="flex gap-4">
-                          <input
-                            type="text"
-                            placeholder="姓名 *"
-                            className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
-                            value={editForm.name}
-                            onChange={(e) =>
-                              setEditForm({ ...editForm, name: e.target.value })
-                            }
-                          />
-                          <input
-                            type="text"
-                            placeholder="地點"
-                            className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 outline-none text-slate-800"
-                            value={editForm.location}
-                            onChange={(e) =>
-                              setEditForm({
-                                ...editForm,
-                                location: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold mb-2 text-slate-700">
-                            點擊地圖重新定位
-                          </label>
-                          <div className="h-48 rounded-xl overflow-hidden border border-teal-200/50">
-                            <iframe
-                              ref={editMapIframeRef}
-                              width="100%"
-                              height="100%"
-                              frameBorder="0"
-                              srcDoc={`<!DOCTYPE html><html><head><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script><style>body{margin:0;padding:0;}#map{width:100vw;height:100vh;cursor:crosshair;}</style></head><body><div id="map"></div><script>let map=L.map('map').setView([${editForm.lat || 23.5}, ${editForm.lon || 121.0}],${editForm.lat && editForm.lon ? 16 : 7});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);let marker${editForm.lat && editForm.lon ? `=L.marker([${editForm.lat}, ${editForm.lon}]).addTo(map)` : ""};L.Control.geocoder({defaultMarkGeocode:false,placeholder:"搜尋地址..."}).on('markgeocode',function(e){const center=e.geocode.center;map.setView(center,16);if(marker){marker.setLatLng(center);}else{marker=L.marker(center).addTo(map);}window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:center.lat,lon:center.lng,location:e.geocode.name},'*');}).addTo(map);map.on('click',function(e){if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);window.parent.postMessage({type:'PICK_LOCATION_EDIT',lat:e.latlng.lat,lon:e.latlng.lng},'*');});window.addEventListener('message',function(e){if(e.data.type==='UPDATE_MAP'){map.setView([e.data.lat,e.data.lon],16);if(marker)marker.setLatLng([e.data.lat,e.data.lon]);else marker=L.marker([e.data.lat,e.data.lon]).addTo(map);}});</script></body></html>`}
-                            ></iframe>
-                          </div>
-                        </div>
-                        {/* 顯示該筆通報的照片預覽，以符合原本表單雙欄結構的視覺平衡 */}
-                        <div>
-                          <label className="block text-sm font-semibold mb-2 text-slate-700">
-                            通報照片
-                          </label>
-                          {editingReport.photo ? (
-                            <img
-                              src={editingReport.photo}
-                              className="w-full h-48 object-cover rounded-xl shadow-md"
-                              alt="通報照片"
-                            />
-                          ) : (
-                            <div className="w-full h-48 bg-slate-50 rounded-xl flex items-center justify-center border border-dashed border-teal-200 text-slate-400">
-                              無照片
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-6">
-                        <div>
-                          <label className="block text-sm font-semibold mb-2 text-slate-700">
-                            AI 辨識結果 (可手動修改)
-                          </label>
-                          <textarea
-                            className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 h-40 text-sm outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
-                            placeholder="AI 辨識結果..."
-                            value={editForm.aiResult}
-                            onChange={(e) =>
-                              setEditForm({
-                                ...editForm,
-                                aiResult: e.target.value,
-                              })
-                            }
-                          ></textarea>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold mb-2 text-slate-700">
-                            其他備註事項
-                          </label>
-                          <textarea
-                            className="w-full p-3 rounded-xl bg-slate-50 border border-teal-200/50 h-32 outline-none focus:ring-2 focus:ring-teal-500 text-slate-800"
-                            placeholder="其他備註事項..."
-                            value={editForm.notes}
-                            onChange={(e) =>
-                              setEditForm({
-                                ...editForm,
-                                notes: e.target.value,
-                              })
-                            }
-                          ></textarea>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-8 flex gap-4 justify-end border-t border-slate-100 pt-6">
-                      <button
-                        onClick={() => setEditingReport(null)}
-                        className="px-8 py-3 rounded-xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50"
-                      >
-                        取消
-                      </button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const { updateDoc, doc } = await import(
-                              "firebase/firestore"
-                            );
-                            await updateDoc(
-                              doc(
-                                db,
-                                "artifacts",
-                                globalAppId,
-                                "public",
-                                "data",
-                                "bird_reports",
-                                editingReport.id
-                              ),
-                              {
-                                species: editForm.species,
-                                status: editForm.status,
-                                name: editForm.name,
-                                location: editForm.location,
-                                lat: editForm.lat,
-                                lon: editForm.lon,
-                                notes: editForm.notes,
-                                aiResult: editForm.aiResult,
-                              }
-                            );
-                            showToast("修改成功");
-                            setEditingReport(null);
-                          } catch (e) {
-                            showToast("修改失敗", "error");
-                          }
-                        }}
-                        className="px-8 py-3 rounded-xl font-bold bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-md hover:shadow-lg transition-all flex items-center gap-2"
-                      >
-                        <Check size={18} /> 儲存變更
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
-        return <AdminPageContent />;
-      })()
+      <AdminPageContent
+        reports={reports}
+        contactMessages={contactMessages}
+        personnel={personnel}
+        adminView={adminView}
+        setAdminView={setAdminView}
+        showToast={showToast}
+        setDeleteTarget={setDeleteTarget}
+        setIsAdminAuth={setIsAdminAuth}
+      />
     );
 
   const renderAboutPage = () => (
