@@ -1451,6 +1451,7 @@ export default function App() {
   }, [user, personnel]);
   const isAdminOrOwner =
     currentUserRole === "管理者" || currentUserRole === "擁有者";
+  const isBlacklisted = currentUserRole === "黑名單";
 
   // 安全防護：若目前頁面為後台管理，但使用者不具備管理員/擁有者權限，自動導回鳥類救傷頁
   useEffect(() => {
@@ -1458,6 +1459,29 @@ export default function App() {
       setCurrentPage("rescue");
     }
   }, [currentPage, isAdminOrOwner]);
+
+  // 黑名單帳號攔截：一旦偵測到目前登入帳號為黑名單，立即強制導向隨機外部網址，不允許繼續使用本站
+  // 請在下方陣列填入您指定的網址（目前為佔位符，請自行替換）
+  const BLACKLIST_REDIRECT_URLS = [
+    "https://zh.wikipedia.org/wiki/%E7%94%B5%E8%84%91%E7%8A%AF%E7%BD%AA",
+    "https://zh.wikipedia.org/wiki/%E7%92%B0%E5%A2%83%E5%80%AB%E7%90%86",
+    "https://zh.wikipedia.org/wiki/%E5%88%A9%E4%BB%96%E4%B8%BB%E4%B9%89",
+    "https://zh.wikipedia.org/wiki/%E7%B6%B2%E8%B7%AF%E7%99%BD%E7%9B%AE",
+    "http://zh.wikipedia.org/wiki/%E7%B6%B2%E8%B7%AF%E8%A6%8F%E7%AF%84",
+    "https://zh.wikipedia.org/wiki/%E9%81%93%E5%BE%B7",
+    "https://zh.wikipedia.org/wiki/%E5%AE%9A%E8%A8%80%E4%BB%A4%E5%BC%8F",
+    "https://zh.wikipedia.org/wiki/%E8%99%9A%E6%97%A0%E4%B8%BB%E4%B9%89",
+    "https://zh.wikipedia.org/wiki/%E5%9B%A0%E6%9E%9C%E8%AE%BA_(%E4%BD%9B%E6%95%99)",
+  ];
+  useEffect(() => {
+    if (isBlacklisted) {
+      const randomUrl =
+        BLACKLIST_REDIRECT_URLS[
+          Math.floor(Math.random() * BLACKLIST_REDIRECT_URLS.length)
+        ];
+      window.location.href = randomUrl;
+    }
+  }, [isBlacklisted]);
 
   const navItems = [
     { id: "rescue", label: "鳥類救傷", icon: Bird },
@@ -2417,6 +2441,11 @@ export default function App() {
       </GlassCard>
     </div>
   );
+
+  // 黑名單帳號：導向動作已在上方 useEffect 觸發，這裡直接不渲染任何網站內容，避免畫面閃現
+  if (isBlacklisted) {
+    return <div style={{ minHeight: "100vh", background: "#e0f2f1" }}></div>;
+  }
 
   return (
     <div className="min-h-screen bg-[#e0f2f1] dark:bg-[#00251a] text-slate-800 dark:text-slate-200 font-sans pb-20 overflow-x-hidden selection:bg-teal-200 transition-colors duration-500">
