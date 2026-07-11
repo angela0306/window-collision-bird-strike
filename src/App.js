@@ -417,6 +417,34 @@ export default function App() {
     }
   }, [formData.lat, formData.lon]);
 
+  // 取得手機/裝置目前 GPS 定位（不需輸入地址），沿用既有的 PICK_LOCATION 訊息機制自動反查地址並更新地圖
+  const [isLocating, setIsLocating] = useState(false);
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      showToast("此裝置不支援定位功能", "error");
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        // 透過既有的 window message 監聽機制（handleMessage）處理反查地址與更新表單
+        window.postMessage(
+          { type: "PICK_LOCATION", lat: latitude, lon: longitude },
+          "*"
+        );
+        showToast("已取得目前定位");
+        setIsLocating(false);
+      },
+      (err) => {
+        console.error("定位失敗:", err);
+        showToast("定位失敗，請確認已允許定位權限", "error");
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
   // 全域登入登出
   const handleGoogleLogin = async () => {
     if (!auth) return showToast("無法連線", "error");
@@ -741,9 +769,20 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold mb-2">
-                  點擊地圖定位
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold">
+                    點擊地圖定位
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentLocation}
+                    disabled={isLocating}
+                    className="flex items-center gap-1.5 text-xs font-bold text-teal-700 bg-teal-100 hover:bg-teal-200 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <MapPin size={14} />
+                    {isLocating ? "定位中..." : "使用目前位置"}
+                  </button>
+                </div>
                 <div className="h-48 rounded-xl overflow-hidden border border-teal-200/50">
                   <iframe
                     ref={mapIframeRef}
