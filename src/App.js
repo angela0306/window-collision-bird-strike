@@ -694,13 +694,33 @@ export default function App() {
   // ==========================================
   // UI 渲染區塊
   // ==========================================
+
+  // 判斷目前登入帳號的權限身份：僅「管理者」或「擁有者」可看到並進入後台管理分頁
+  const currentUserRole = useMemo(() => {
+    if (!user || user.isAnonymous) return null;
+    if (user.email === "angela1010306@gmail.com") return "擁有者";
+    const person = personnel.find(
+      (p) => p.uid === user.uid || (p.email && p.email === user.email)
+    );
+    return person?.role || "一般民眾";
+  }, [user, personnel]);
+  const isAdminOrOwner =
+    currentUserRole === "管理者" || currentUserRole === "擁有者";
+
+  // 安全防護：若目前頁面為後台管理，但使用者不具備管理員/擁有者權限，自動導回鳥類救傷頁
+  useEffect(() => {
+    if (currentPage === "admin" && !isAdminOrOwner) {
+      setCurrentPage("rescue");
+    }
+  }, [currentPage, isAdminOrOwner]);
+
   const navItems = [
     { id: "rescue", label: "鳥類救傷", icon: Bird },
     { id: "window", label: "窗殺預防", icon: Wind },
     { id: "data", label: "數據資料", icon: Database },
     { id: "admin", label: "後台管理", icon: Settings },
     { id: "about", label: "關於我們", icon: Info },
-  ];
+  ].filter((item) => item.id !== "admin" || isAdminOrOwner);
 
   const renderRescuePage = () =>
     rescueStep === "report_form" ? (
