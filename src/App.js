@@ -1638,6 +1638,61 @@ export default function App() {
           </p>
         </div>
 
+        {/* 原有區塊：野鳥救傷 4 步驟 SOP */}
+        <GlassCard>
+          <h3 className="text-2xl font-bold text-teal-800 mb-6 flex items-center gap-2">
+            <AlertTriangle className="text-amber-500" /> 正確野鳥救傷 4 步驟
+            (SOP)
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
+              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
+                1
+              </div>
+              <h4 className="font-bold text-teal-800">觀察確認</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                先判斷是正在學飛的健康幼鳥（通常親鳥在附近），還是真正受傷、生病需要救援的個體，切勿馬上撿拾。
+              </p>
+            </div>
+
+            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
+              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
+                2
+              </div>
+              <h4 className="font-bold text-teal-800">安全保定</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                請戴上手套或利用毛巾、外套輕輕將鳥兒罩住並抓起，遮蔽視線能幫助牠們穩定情緒，避免掙扎受傷。
+              </p>
+            </div>
+
+            <div className="bg-red-50/50 p-5 rounded-2xl border border-red-200 text-center space-y-3 relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-red-500 text-white text-[10px] px-2 py-1 rounded-bl-lg font-bold">
+                極重要
+              </div>
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
+                3
+              </div>
+              <h4 className="font-bold text-red-800">安置與禁食</h4>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                放入戳有透氣孔、底墊報紙的暗紙箱中。
+                <strong className="text-red-600 block mt-1">
+                  絕對不可強迫餵食或餵水，極易造成嗆傷致死！
+                </strong>
+              </p>
+            </div>
+
+            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
+              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
+                4
+              </div>
+              <h4 className="font-bold text-teal-800">通報送醫</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                保持紙箱溫暖與環境安靜，盡速填寫上方通報表單，並聯繫所在地野鳥救傷學會或動保處協助處理。
+              </p>
+            </div>
+          </div>
+        </GlassCard>
+
         {/* 原有區塊：上傳與辨識結果 */}
         <GlassCard>
           <div className="flex flex-col md:flex-row gap-8">
@@ -1732,61 +1787,6 @@ export default function App() {
                   我要通報 (建立紀錄)
                 </Button>
               </div>
-            </div>
-          </div>
-        </GlassCard>
-
-        {/* 原有區塊：野鳥救傷 4 步驟 SOP */}
-        <GlassCard>
-          <h3 className="text-2xl font-bold text-teal-800 mb-6 flex items-center gap-2">
-            <AlertTriangle className="text-amber-500" /> 正確野鳥救傷 4 步驟
-            (SOP)
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
-              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
-                1
-              </div>
-              <h4 className="font-bold text-teal-800">觀察確認</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                先判斷是正在學飛的健康幼鳥（通常親鳥在附近），還是真正受傷、生病需要救援的個體，切勿馬上撿拾。
-              </p>
-            </div>
-
-            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
-              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
-                2
-              </div>
-              <h4 className="font-bold text-teal-800">安全保定</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                請戴上手套或利用毛巾、外套輕輕將鳥兒罩住並抓起，遮蔽視線能幫助牠們穩定情緒，避免掙扎受傷。
-              </p>
-            </div>
-
-            <div className="bg-red-50/50 p-5 rounded-2xl border border-red-200 text-center space-y-3 relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-red-500 text-white text-[10px] px-2 py-1 rounded-bl-lg font-bold">
-                極重要
-              </div>
-              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
-                3
-              </div>
-              <h4 className="font-bold text-red-800">安置與禁食</h4>
-              <p className="text-xs text-slate-700 leading-relaxed">
-                放入戳有透氣孔、底墊報紙的暗紙箱中。
-                <strong className="text-red-600 block mt-1">
-                  絕對不可強迫餵食或餵水，極易造成嗆傷致死！
-                </strong>
-              </p>
-            </div>
-
-            <div className="bg-white/60 p-5 rounded-2xl border border-teal-100/50 text-center space-y-3">
-              <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-2 font-black text-xl">
-                4
-              </div>
-              <h4 className="font-bold text-teal-800">通報送醫</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                保持紙箱溫暖與環境安靜，盡速填寫上方通報表單，並聯繫所在地野鳥救傷學會或動保處協助處理。
-              </p>
             </div>
           </div>
         </GlassCard>
