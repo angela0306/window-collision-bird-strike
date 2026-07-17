@@ -1631,7 +1631,7 @@ export default function App() {
       <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-12">
         <div className="text-center mb-10">
           <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-emerald-600 mb-4">
-            守護飛羽，從你我開始
+            城市飛羽守護行動
           </h1>
           <p className="text-slate-600 dark:text-slate-300 text-lg">
             發現受傷鳥類？請使用 AI 辨識系統進行初步評估，並進行通報。
